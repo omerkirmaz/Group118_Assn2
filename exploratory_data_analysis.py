@@ -1,10 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 
 import warnings
-
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
@@ -13,7 +11,6 @@ class ExploratoryDataAnalysis:
     def __init__(self, filepath):
         self.df = pd.read_csv(filepath)
 
-        # self.save_search_affinity_score_dataframe()
         self.print_EDA()
 
     def check_null_columns(self):
@@ -27,15 +24,10 @@ class ExploratoryDataAnalysis:
         print(missing_data.head(len(self.df.columns.tolist())).to_string())
 
     def visualise_and_save_correlations(self):
-        # split_df = [self.df['price_usd']]
-        # fig, ax = plt.subplots()
-        # fig.set_size_inches(15, 10)
-        # sns.heatmap([np.asarray(self.df.corr().iloc[:,0])] ,2 ,cmap='coolwarm', ax=ax, annot=True, linewidths=2, square=True)
-        # fig.savefig(f"figures/correlations/price.png")
-        # fig.show()
-
-        # half_df = len(self.df.columns.to_list()) // 2
-        # split_df = [self.df.iloc[:, : half_df], self.df.iloc[:, half_df:]]
+        """
+        saves a png file in the correlations directory in figures.
+        :return: correlation.png
+        """
 
         fig, ax = plt.subplots()
         fig.set_size_inches(30, 20)
@@ -43,16 +35,29 @@ class ExploratoryDataAnalysis:
         fig.savefig(f"figures/correlations/correlation.png")
         fig.show()
 
-        # for j in enumerate(split_df):
-        #
-        #     data2 = j[1]
-        #     sns.heatmap(round(data1.corr(data2), 2), cmap='coolwarm', ax=ax, annot=True, linewidths=2)
-        #     fig.savefig(f"figures/correlations/correlation{i[0],j}.png")
-        #     fig.show()
-
     def save_search_affinity_score_dataframe(self):
+        """
+        just some code i didnt want to delete. just checks the search affinity score column
+        :return:
+        """
         search_affinity_score_df = self.df[self.df['srch_query_affinity_score'].notna()]
         print(search_affinity_score_df.head(100).to_string())
+
+    def plotting(self):
+        """
+        This function plots a chart for every column. Some columns shouldnt be plotted though. It takes a long time. So
+        instead, you might want to uncomment the code and add the columns which you want to plot to that list and
+        update the for loop
+        :return: plots saved in /figures directory
+        """
+        # wanted_cols = [""]
+
+        for col in reversed(self.df.columns):
+            fig, ax = plt.subplots()
+            fig.set_size_inches(13, 8)
+            sns.countplot(col, data=self.df, order=self.df[col].unique().sort(), ax=ax)
+            fig.savefig(f"figures/{col}.png")
+            # fig.show
 
     def print_EDA(self):
         print("""EXPLORATORY DATA ANALYSIS
@@ -76,36 +81,15 @@ class ExploratoryDataAnalysis:
         print("""
 
         --------------------------------------------------------------------------------------------------------
-        Heatmap of all correlations —–> check figures/correlations.png
+        Heatmap of all correlations —–> check figures/correlations/correlation.png
+        --------------------------------------------------------------------------------------------------------
+        --------------------------------------------------------------------------------------------------------
+        Plots for columns —–> check figures/plots/columns.png
         --------------------------------------------------------------------------------------------------------
 
         """)
         self.visualise_and_save_correlations()
-
-        print("""
-
-        --------------------------------------------------------------------------------------------------------
-        Plots for columns —–> check figures/columns.png
-        --------------------------------------------------------------------------------------------------------
-
-        """)
         # self.plotting()
-
-    def plotting(self):
-        """
-        This function plots a chart for every column. Some columns shouldnt be plotted though. It takes a long time. So
-        instead, you might want to uncomment the code and add the columns which you want to plot to that list and
-        update the for loop
-        :return: plots saved in /figures directory
-        """
-        # wanted_cols = [""]
-
-        for col in reversed(self.df.columns):
-            fig, ax = plt.subplots()
-            fig.set_size_inches(13, 8)
-            sns.countplot(col, data=self.df, order=self.df[col].unique().sort(), ax=ax)
-            fig.savefig(f"figures/{col}.png")
-            # fig.show
 
 
 train_set_filepath = "data/shortened_data_5000.csv"
