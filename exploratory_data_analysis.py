@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 
 import warnings
 
@@ -26,15 +27,28 @@ class ExploratoryDataAnalysis:
         print(missing_data.head(len(self.df.columns.tolist())).to_string())
 
     def visualise_and_save_correlations(self):
-        half_df = len(self.df.columns.to_list()) // 2
-        split_df = [self.df.iloc[:, : half_df], self.df.iloc[:, half_df:]]
+        # split_df = [self.df['price_usd']]
+        # fig, ax = plt.subplots()
+        # fig.set_size_inches(15, 10)
+        # sns.heatmap([np.asarray(self.df.corr().iloc[:,0])] ,2 ,cmap='coolwarm', ax=ax, annot=True, linewidths=2, square=True)
+        # fig.savefig(f"figures/correlations/price.png")
+        # fig.show()
 
-        for i in enumerate(split_df):
-            fig, ax = plt.subplots()
-            fig.set_size_inches(15, 10)
-            sns.heatmap(round(i[1].corr(), 2), cmap='coolwarm', ax=ax, annot=True, linewidths=2)
-            fig.savefig(f"figures/correlations{i[0]}.png")
-            fig.show()
+        # half_df = len(self.df.columns.to_list()) // 2
+        # split_df = [self.df.iloc[:, : half_df], self.df.iloc[:, half_df:]]
+
+        fig, ax = plt.subplots()
+        fig.set_size_inches(30, 20)
+        sns.heatmap(round(self.df.corr(), 2), cmap='coolwarm', ax=ax, annot=True, linewidths=2)
+        fig.savefig(f"figures/correlations/correlation.png")
+        fig.show()
+
+        # for j in enumerate(split_df):
+        #
+        #     data2 = j[1]
+        #     sns.heatmap(round(data1.corr(data2), 2), cmap='coolwarm', ax=ax, annot=True, linewidths=2)
+        #     fig.savefig(f"figures/correlations/correlation{i[0],j}.png")
+        #     fig.show()
 
     def save_search_affinity_score_dataframe(self):
         search_affinity_score_df = self.df[self.df['srch_query_affinity_score'].notna()]
@@ -75,7 +89,7 @@ class ExploratoryDataAnalysis:
         --------------------------------------------------------------------------------------------------------
 
         """)
-        #self.plotting()
+        # self.plotting()
 
     def plotting(self):
         """
@@ -96,4 +110,3 @@ class ExploratoryDataAnalysis:
 
 train_set_filepath = "data/shortened_data_5000.csv"
 to_preprocess = ExploratoryDataAnalysis(train_set_filepath)
-
