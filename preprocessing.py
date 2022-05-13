@@ -35,6 +35,11 @@ class PreProcess:
         self.cut_columns()
         return self.df
 
+    def affinity_clean(self):
+    
+        affinity_clean_df = self.df[self.df["srch_query_affinity_score"].notna()]
+        return affinity_clean_df
+
     # def price_usd(self):
     #
     #     visitor_location_df = self.df[self.df["site_id"].notna()]
