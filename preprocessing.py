@@ -1,5 +1,6 @@
 import statistics
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 
 
 class PreProcess:
@@ -7,13 +8,15 @@ class PreProcess:
     def __init__(self, dataframe):
         self.df = dataframe
 
-        self.run()
-        #print(self.df.head(200).to_string())
+        # self.run()
+        # print(self.df.head(200).to_string())
 
         # print(self.df["price_usd"].head(200).to_string(), self.df["gross_bookings_usd"].head(200).to_string())
         # self.price_usd()
 
     def cut_columns(self):
+
+        del self.df['date_time']
 
         all_cols = self.df.columns.tolist()
 
@@ -30,10 +33,43 @@ class PreProcess:
             median = statistics.median(self.df[col].dropna())
             self.df[col].fillna(median, inplace=True)
 
+    def normalize(self):
+
+        if 'position' in self.df.columns:
+            independent_df = self.df.drop(['position', 'srch_id'], axis=1)
+            position_df = pd.DataFrame(self.df['position'].values.reshape(independent_df.shape[0], 1),
+                                       columns=['position'])
+            srch_id_df = pd.DataFrame(self.df['srch_id'].values.reshape(independent_df.shape[0], 1),
+                                      columns=['srch_id'])
+
+            scaler = MinMaxScaler()
+            scaler.fit(independent_df)
+            scaled = scaler.fit_transform(independent_df)
+            scaled_df = pd.DataFrame(scaled, columns=independent_df.columns)
+
+            rescaled_df = pd.concat([srch_id_df, scaled_df, position_df], axis=1)
+
+        else:
+
+            independent_df = self.df.drop(['position', 'srch_id'], axis=1)
+            srch_id_df = pd.DataFrame(self.df['srch_id'].values.reshape(independent_df.shape[0], 1),
+                                      columns=['srch_id'])
+
+            scaler = MinMaxScaler()
+            scaler.fit(independent_df)
+            scaled = scaler.fit_transform(independent_df)
+            scaled_df = pd.DataFrame(scaled, columns=independent_df.columns)
+
+            rescaled_df = pd.concat([srch_id_df, scaled_df], axis=1)
+
+        return rescaled_df
+
     def run(self):
         self.replace_nan_with_median()
         self.cut_columns()
-        return self.df
+        normalized_df = self.normalize()
+
+        return normalized_df
 
     # def price_usd(self):
     #
