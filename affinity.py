@@ -90,7 +90,7 @@ class LGBM_affinity:
         return affinity_clean_df
 
 
-example_file = "/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/Group118_Assn2/data/shortened_data_5000.csv"
+example_file = "data/shortened_data_5000.csv"
 LGBM_affinity(example_file)
 # train_score, val_score = LGBM_affinity(example_file)
 # print(f"Training performance:{train_score}\nValidation performance:{val_score}")
