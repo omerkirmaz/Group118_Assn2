@@ -25,10 +25,6 @@ class Light_GBM:
         X_train = train_df.drop(["srch_id", "position"], axis=1)
         y_train = train_df["position"]
 
-        qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_train = train_df.drop(["srch_id", "position"], axis=1)
-        y_train = train_df["position"]
-
         qids_validation = validation_df.groupby("srch_id")["srch_id"].count().to_numpy()
         X_validation = validation_df.drop(["srch_id", "position"], axis=1)
         y_validation = validation_df["position"]
@@ -94,7 +90,6 @@ class Light_GBM:
     def lightGBM_predict(self):
 
         for pred_chunk in enumerate(self.df_test_iterator):
-
             qids_train, X_test = PreProcess.run(pred_chunk[1])
             test_pred = lightgbm.LGBMRanker().predict(X_test)
 
@@ -109,9 +104,9 @@ class Light_GBM:
             print(f"——— successfully saved chunk{pred_chunk[0]} predicitons ——— ")
 
 
-training_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
-testing_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
-run_large_file_LGBM = Light_GBM(training_filepath, testing_filepath)
+# training_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
+# testing_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
+# run_large_file_LGBM = Light_GBM(training_filepath, testing_filepath)
 
 
 class small_data_LGBMRanker:
@@ -119,6 +114,8 @@ class small_data_LGBMRanker:
     def __init__(self, train_filepath, test_filepath=None):
         self.df_train = pd.read_csv(train_filepath)
         self.df_test = pd.read_csv(test_filepath)
+
+        self.LGBMRanker_example()
 
     def example_train_preprocessing(self):
         data_df = PreProcess(self.df_train).run()
@@ -138,20 +135,16 @@ class small_data_LGBMRanker:
     def example_predictions_preprocess(self):
         data_df = PreProcess(self.df_test).run()
 
-        qids_train = data_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_test = data_df.drop(["srch_id"], axis=1)
+        return data_df
 
-        return qids_train, X_test
-
-    def train_LGBMRanker_example(self):
+    def LGBMRanker_example(self):
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation = self.example_train_preprocessing()
+        X_test = self.example_predictions_preprocess()
 
-        model = lightgbm.LGBMRanker(
-            objective="lambdarank",
-            metric="ndcg",
-            label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)]
-
-        )
+        model = lightgbm.LGBMRanker(objective="lambdarank",
+                                    metric="ndcg",
+                                    label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)]
+                                    )
 
         model.fit(
             X=X_train,
@@ -161,14 +154,32 @@ class small_data_LGBMRanker:
             eval_group=[qids_validation],
             eval_at=10,
             verbose=10,
-            init_model='light_GBM_model/model.txt'
         )
 
-    def example_lightGBM_predict(self):
-        qids_train, X_test = self.example_predictions_preprocess()
-        test_pred = lightgbm.LGBMRanker().predict(X_test)
+        final_predictions_df = pd.DataFrame(columns=['srch_id', 'property_id'])
 
-        return test_pred
+        for srch_id in enumerate(X_test['srch_id'].unique()):
 
-# example_file = "data/shortened_data_5000.csv"
-# Light_GBM(example_file)
+            X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
+            X_test_copy = X_test_per_site.copy()
+
+            del X_test_per_site['srch_id']
+            del X_test_per_site['property_id']
+
+            test_pred = model.predict(X_test_per_site)
+            X_test_copy['position'] = test_pred
+
+            # NOT QUITE SURE IF ITS SORTED IN THE CORRECT ORDER NOW
+
+            X_test_copy = X_test_copy.sort_values(by=['position'], ascending=True)
+            short_df = X_test_copy[['srch_id', 'property_id']].copy()
+            final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
+
+        final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
+        final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
+        final_predictions_df.to_csv(r'data/test_data_5000_predictions.csv', index=False, header=True)
+
+
+train_example_file = "data/shortened_data_5000.csv"
+test_example_file = "data/shortened_test_data_5000.csv"
+small_data_LGBMRanker(train_example_file, test_example_file)
