@@ -16,14 +16,26 @@ class PreProcess:
 
     def cut_columns(self):
 
-        del self.df['date_time']
+        if 'date_time' in self.df.columns:
+            del self.df['date_time']
 
-        all_cols = self.df.columns.tolist()
+        if 'click_bool' in self.df.columns:
+            del self.df['click_bool']
 
-        for col in all_cols:
-            missing = self.df[col].isnull().sum()
-            if missing != 0:
-                del self.df[col]
+        if 'booking_bool' in self.df.columns:
+            del self.df['booking_bool']
+
+        if 'gross_bookings_usd' in self.df.columns:
+            del self.df['gross_bookings_usd']
+
+        self.df.fillna(value=0, inplace=True)
+
+        # all_cols = self.df.columns.tolist()
+        #
+        # for col in all_cols:
+        #     missing = self.df[col].isnull().sum()
+        #     if missing != 0:
+        #         del self.df[col]
 
     def replace_nan_with_median(self):
         nan_columns = ["visitor_hist_starrating", "visitor_hist_adr_usd", "prop_review_score",
@@ -51,16 +63,19 @@ class PreProcess:
 
         else:
 
-            independent_df = self.df.drop(['position', 'srch_id'], axis=1)
+            independent_df = self.df.drop(['srch_id'], axis=1)
             srch_id_df = pd.DataFrame(self.df['srch_id'].values.reshape(independent_df.shape[0], 1),
                                       columns=['srch_id'])
+            prop_id_df = pd.DataFrame(self.df['prop_id'].values.reshape(independent_df.shape[0], 1),
+                                      columns=['property_id'])
+            prop_id_df['property_id'] = prop_id_df['property_id'].astype(int)
 
             scaler = MinMaxScaler()
             scaler.fit(independent_df)
             scaled = scaler.fit_transform(independent_df)
             scaled_df = pd.DataFrame(scaled, columns=independent_df.columns)
 
-            rescaled_df = pd.concat([srch_id_df, scaled_df], axis=1)
+            rescaled_df = pd.concat([srch_id_df, prop_id_df, scaled_df], axis=1)
 
         return rescaled_df
 
