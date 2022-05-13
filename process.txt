@@ -4,3 +4,5 @@
 30/4 — 22.00 — L — some EDA to check correlation of two columns and their average on clicking a property
 08/5 — 22.15 — L — updating EDA file to get a correlation heatmap, and percentages f missing values
 11/4 - 16.00 - Group - had a zoom meeting, discussed how to handle the price_usd column (per night vs. per week)
+12/4 - Omer and Leo - Did research on various models that would be suitable for our case, Omer found and suggested LGBM and Leo implemented it
+13/4 - O - adapted the LGBM model to the search query affinity score in the dataset to potentially predict missing values, with the goal of enhancing the overall model. may need some bugfixing but seems to work
