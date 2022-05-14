@@ -4,6 +4,7 @@ import pandas as pd
 import lightgbm
 import matplotlib.pyplot as plt
 from sklearn import metrics
+from sklearn import preprocessing
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
@@ -15,6 +16,9 @@ class LGBM_affinity:
 
     def __init__(self, filepath):
         self.df_train = pd.read_csv(filepath)
+        scaler = preprocessing.MinMaxScaler()
+        normalpos = scaler.fit_transform(self.df_train["position"].to_list())
+        self.df_train["position"] = normalpos
         # X_train, X_gold, y_train, y_gold = self.training_split()
 
         self.parameters = {'objective': 'lambdarank',
