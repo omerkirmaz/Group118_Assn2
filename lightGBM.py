@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import lightgbm
 
@@ -12,8 +13,16 @@ class Light_GBM:
         self.df_train_iterator = pd.read_csv(train_filepath, chunksize=100000)
         self.df_test_iterator = pd.read_csv(test_filepath, chunksize=100000)
 
-        self.training_LGBMRanker_chunks()
-        self.lightGBM_predict()
+        self.qids_train = None
+        self.X_train = None
+        self.y_train = np.array([])
+        self.qids_validation = None
+        self.X_validation = None
+        self.y_validation = np.array([])
+
+        self.model = lightgbm.LGBMRanker()
+
+        self.LGBMRanker()
 
     def train_model_preprocessing(self, chunk_dataframe):
 
@@ -35,78 +44,93 @@ class Light_GBM:
 
         data_df = PreProcess(prediction_dataframe).run()
 
-        qids_train = data_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_test = data_df.drop(["srch_id"], axis=1)
+        return data_df
 
-        return qids_train, X_test
-
-    def training_LGBMRanker_chunks(self):
+    def LGBMRanker(self):
 
         for training_chunk in enumerate(self.df_train_iterator):
 
-            qids_train, X_train, y_train, qids_validation, X_validation, y_validation = self.train_model_preprocessing(
-                training_chunk[1])
+            self.qids_train, self.X_train, self.y_train, self.qids_validation, self.X_validation, self.y_validation = \
+                self.train_model_preprocessing(training_chunk[1])
 
             if exists('lightGBM_model/lgb_ranker.txt'):
 
-                model = lightgbm.LGBMRanker(
+                self.model = lightgbm.LGBMRanker(
                     objective="lambdarank",
                     metric="ndcg",
-                    label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)]
+                    label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)]
 
                 )
 
-                gbm = model.fit(X=X_train,
-                                y=y_train,
-                                group=qids_train,
-                                eval_set=[(X_validation, y_validation)],
-                                eval_group=[qids_validation],
-                                eval_at=10,
-                                verbose=10,
-                                init_model='lightGBM_model/lgb_ranker.txt'
-                                )
+                gbm = self.model.fit(X=self.X_train,
+                                     y=self.y_train,
+                                     group=self.qids_train,
+                                     eval_set=[(self.X_validation, self.y_validation)],
+                                     eval_group=[self.qids_validation],
+                                     eval_at=10,
+                                     verbose=10,
+                                     init_model='lightGBM_model/lgb_ranker.txt'
+                                     )
                 gbm.booster_.save_model('lightGBM_model/lgb_ranker.txt', num_iteration=gbm.best_iteration_)
                 print(f"GBM: Saving iteration {training_chunk[0]} —— done.")
 
             else:
 
-                model = lightgbm.LGBMRanker(
+                self.model = lightgbm.LGBMRanker(
                     objective="lambdarank",
                     metric="ndcg",
-                    label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)]
+                    label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)]
                 )
 
-                gbm_init = model.fit(X=X_train,
-                                     y=y_train,
-                                     group=qids_train,
-                                     eval_set=[(X_validation, y_validation)],
-                                     eval_group=[qids_validation],
-                                     eval_at=100,
-                                     verbose=100
-                                     )
+                gbm_init = self.model.fit(X=self.X_train,
+                                          y=self.y_train,
+                                          group=self.qids_train,
+                                          eval_set=[(self.X_validation, self.y_validation)],
+                                          eval_group=[self.qids_validation],
+                                          eval_at=10,
+                                          verbose=10,
+                                          )
                 gbm_init.booster_.save_model('lightGBM_model/lgb_ranker.txt', num_iteration=gbm_init.best_iteration_)
                 print(f"GBM_init: saving iteration == {training_chunk[0]}, done.")
 
-    def lightGBM_predict(self):
+            #  PREDICTING THE PROPERTY LISTINGS
 
         for pred_chunk in enumerate(self.df_test_iterator):
-            qids_train, X_test = PreProcess.run(pred_chunk[1])
-            test_pred = lightgbm.LGBMRanker().predict(X_test)
+
+            X_test = self.predictions_preprocess(pred_chunk[1])
+            final_predictions_df = pd.DataFrame(columns=['srch_id', 'property_id'])
+
+            for srch_id in enumerate(X_test['srch_id'].unique()):
+                X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
+                X_test_copy = X_test_per_site.copy()
+
+                del X_test_per_site['srch_id']
+                del X_test_per_site['property_id']
+
+                test_pred = self.model.predict(X_test_per_site)
+                X_test_copy['position'] = test_pred
+
+                # NOT QUITE SURE IF ITS SORTED IN THE CORRECT ORDER NOW
+
+                X_test_copy = X_test_copy.sort_values(by=['position'], ascending=True)
+                short_df = X_test_copy[['srch_id', 'property_id']].copy()
+                final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
 
             mode = 'w' if pred_chunk == 0 else 'a'
             header = pred_chunk == 0
 
-            test_pred.to_csv(
-                "predictions/dst_data.csv.gz",
-                index=False,  # Skip index column
-                header=header,
-                mode=mode)
+            final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
+            final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
+
+            final_predictions_df.to_csv(r'lightGBM_model/predictions.csv', index=False,
+                                        header=header,
+                                        mode=mode)
             print(f"——— successfully saved chunk{pred_chunk[0]} predicitons ——— ")
 
 
-# training_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
-# testing_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
-# run_large_file_LGBM = Light_GBM(training_filepath, testing_filepath)
+training_filepath = "../original_data/training_set_VU_DM.csv"  # these filepaths will differ from yours
+testing_filepath = "../original_data/test_set_VU_DM.csv"  # these filepaths will differ from yours
+run_large_file_LGBM = Light_GBM(training_filepath, testing_filepath)
 
 
 class small_data_LGBMRanker:
@@ -159,7 +183,6 @@ class small_data_LGBMRanker:
         final_predictions_df = pd.DataFrame(columns=['srch_id', 'property_id'])
 
         for srch_id in enumerate(X_test['srch_id'].unique()):
-
             X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
             X_test_copy = X_test_per_site.copy()
 
@@ -179,7 +202,6 @@ class small_data_LGBMRanker:
         final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
         final_predictions_df.to_csv(r'data/test_data_5000_predictions.csv', index=False, header=True)
 
-
-train_example_file = "data/shortened_data_5000.csv"
-test_example_file = "data/shortened_test_data_5000.csv"
-small_data_LGBMRanker(train_example_file, test_example_file)
+# train_example_file = "data/shortened_data_5000.csv"
+# test_example_file = "data/shortened_test_data_5000.csv"
+# small_data_LGBMRanker(train_example_file, test_example_file)
