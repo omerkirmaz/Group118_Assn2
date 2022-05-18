@@ -67,8 +67,6 @@ class Light_GBMRanker:
                     metric="ndcg",
                     label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
                     learning_rate=0.0001,
-                    num_i
-
                 )
 
                 gbm = self.model.fit(X=self.X_train,
