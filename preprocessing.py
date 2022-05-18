@@ -1,124 +1,121 @@
-import statistics
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
+
+from tqdm import tqdm
 
 
 class PreProcess:
 
-    def __init__(self, dataframe):
-        self.df = dataframe
+    def __init__(self, train_filepath, test_filepath):
 
-        # self.run()
-        # print(self.df.head(200).to_string())
+        train_cols = list(pd.read_csv(train_filepath, nrows=1))
+        test_cols = list(pd.read_csv(test_filepath, nrows=1))
 
-        # print(self.df["price_usd"].head(200).to_string(), self.df["gross_bookings_usd"].head(200).to_string())
-        # self.price_usd()
+        self.df_train_iterator = pd.read_csv(train_filepath, usecols=[i for i in train_cols if i != 'date_time'],
+                                             chunksize=100000)
+        self.df_test_iterator = pd.read_csv(test_filepath, usecols=[i for i in test_cols if i != 'date_time'],
+                                            chunksize=100000)
 
-    def cut_columns(self):
+        self.save_train()
+        self.save_test()
 
-        if 'date_time' in self.df.columns:
-            del self.df['date_time']
+    def cut_columns(self, norm_df):
 
-        if 'click_bool' in self.df.columns:
-            del self.df['click_bool']
+        if 'date_time' in norm_df.columns:
+            del norm_df['date_time']
 
-        if 'booking_bool' in self.df.columns:
-            del self.df['booking_bool']
+        if 'click_bool' in norm_df.columns:
+            del norm_df['click_bool']
 
-        if 'gross_bookings_usd' in self.df.columns:
-            del self.df['gross_bookings_usd']
+        if 'booking_bool' in norm_df.columns:
+            del norm_df['booking_bool']
 
-        self.df.fillna(value=0, inplace=True)
+        if 'gross_bookings_usd' in norm_df.columns:
+            del norm_df['gross_bookings_usd']
 
-        # all_cols = self.df.columns.tolist()
-        #
-        # for col in all_cols:
-        #     missing = self.df[col].isnull().sum()
-        #     if missing != 0:
-        #         del self.df[col]
+        return norm_df
 
-    def replace_nan_with_median(self):
+    def replace_nan_with_median(self, data_df):
+
         nan_columns = ["visitor_hist_starrating", "visitor_hist_adr_usd", "prop_review_score",
                        "orig_destination_distance"]
 
         for col in nan_columns:
-            median = statistics.median(self.df[col].dropna())
-            self.df[col].fillna(median, inplace=True)
+            median = data_df[col].median()
+            data_df[col].fillna(median, inplace=True)
 
-    def normalize(self):
+        data_df.fillna(value=0, inplace=True)
+        return data_df
 
-        if 'position' in self.df.columns:
-            independent_df = self.df.drop(['position', 'srch_id'], axis=1)
-            position_df = pd.DataFrame(self.df['position'].values.reshape(independent_df.shape[0], 1),
-                                       columns=['position'])
-            srch_id_df = pd.DataFrame(self.df['srch_id'].values.reshape(independent_df.shape[0], 1),
-                                      columns=['srch_id'])
+    def create_dependent_column(self, data_df):
 
-            scaler = MinMaxScaler()
-            scaler.fit(independent_df)
-            scaled = scaler.fit_transform(independent_df)
-            scaled_df = pd.DataFrame(scaled, columns=independent_df.columns)
+        if 'position' in data_df:
 
-            rescaled_df = pd.concat([srch_id_df, scaled_df, position_df], axis=1)
+            normalized_df = pd.DataFrame()
+
+            for search_id in tqdm(data_df['srch_id'].unique()):
+                search_id_df = data_df[data_df['srch_id'] == search_id]
+
+                booked_df = search_id_df[search_id_df['booking_bool'] == 1]
+                booked_list = [5] * len(booked_df.index)
+
+                clicked_on_df = search_id_df[(search_id_df['click_bool']) == 1 & (search_id_df['booking_bool'] == 0)]
+                clicked_on_list = [1] * len(clicked_on_df.index)
+
+                position_df = search_id_df[(search_id_df['booking_bool'] == 0) &
+                                           (search_id_df['click_bool'] == 0)]
+                pos_list = [0] * len(position_df.index)
+
+                ranking_list = booked_list + clicked_on_list + pos_list
+
+                search_id_df = pd.concat([booked_df, clicked_on_df, position_df])
+
+                search_id_df['ranking'] = ranking_list
+                search_id_df = search_id_df.drop_duplicates()
+                search_id_df = search_id_df.drop(['gross_bookings_usd', 'click_bool', 'booking_bool', 'position'],
+                                                 axis=1)
+
+                normalized_df = pd.concat([normalized_df, search_id_df], ignore_index=True)
+
+            return normalized_df
 
         else:
+            normalized_df = data_df.copy()
 
-            independent_df = self.df.drop(['srch_id'], axis=1)
-            srch_id_df = pd.DataFrame(self.df['srch_id'].values.reshape(independent_df.shape[0], 1),
-                                      columns=['srch_id'])
-            prop_id_df = pd.DataFrame(self.df['prop_id'].values.reshape(independent_df.shape[0], 1),
-                                      columns=['property_id'])
-            prop_id_df['property_id'] = prop_id_df['property_id'].astype(int)
+            return normalized_df
 
-            scaler = MinMaxScaler()
-            scaler.fit(independent_df)
-            scaled = scaler.fit_transform(independent_df)
-            scaled_df = pd.DataFrame(scaled, columns=independent_df.columns)
+    def save_train(self):
 
-            rescaled_df = pd.concat([srch_id_df, prop_id_df, scaled_df], axis=1)
+        for chunk in enumerate(self.df_train_iterator):
+            print(f'PREPROCESSING CHUNK {chunk[0]}')
+            train_df = chunk[1]
 
-        return rescaled_df
+            train_df = self.replace_nan_with_median(data_df=train_df)
+            train_df = self.create_dependent_column(train_df)
 
-    def run(self):
-        self.replace_nan_with_median()
-        self.cut_columns()
-        normalized_df = self.normalize()
+            mode = 'w' if chunk[0] == 0 else 'a'
+            header = chunk[0] == 0
 
-        return normalized_df
+            train_df.to_csv(r'data/preprocessed/training_VU_DM.csv', index=False,
+                            header=header,
+                            mode=mode)
 
-    # def price_usd(self):
-    #
-    #     visitor_location_df = self.df[self.df["site_id"].notna()]
-    #     location_5 = visitor_location_df[visitor_location_df['site_id'] == 5]
-    #
-    #     #  print(visitor_location_df['visitor_location_country_id'].unique())
-    #     #  print(visitor_location_df['site_id'].value_counts().to_string())
-    #     #  print(property_country_df.head(200).to_string())
-    #
-    #     booked_location_5 = location_5[location_5['gross_bookings_usd'].notna()]
-    #
-    #     #  print(booked_location_5.head(200).to_string())
-    #     #  print(booked_location_5['visitor_location_country_id'].unique())
-    #     #  print(booked_location_5['visitor_location_country_id'].value_counts().to_string())
-    #
-    #     per_night_df = booked_location_5[booked_location_5['srch_length_of_stay'] == 1]
-    #     per_night_df = booked_location_5[booked_location_5['promotion_flag'] == 0]
-    #
-    #     print("""
-    #     PRICE PER NIGHT, TOTAL PRICE, THE PERCENTAGE OF DIFFERENCE BETWEEEN THEM"
-    #     """)
-    #
-    #     for row in range(len(per_night_df['price_usd'])):
-    #         price = per_night_df['price_usd'].loc[per_night_df.index[row]]
-    #         stay = per_night_df['srch_length_of_stay'].loc[per_night_df.index[row]]
-    #         total_booking = per_night_df['gross_bookings_usd'].loc[per_night_df.index[row]]
-    #         diff = total_booking - price
-    #         percent = round((diff / total_booking) * 100, 2)
-    #
-    #         print(price * stay, "== price per night |||", total_booking, "== total booking",
-    #               "||| percent difference = ",
-    #               percent)
-    #         print("---------------------------------------------------------------------------------------------------")
+            print(f"——— successfully saved chunk {chunk[0]} ——— ")
 
-# csv_df = pd.read_csv("data/shortened_data_5000.csv")
-# preprocessed_csv = PreProcess(csv_df)
+    def save_test(self):
+
+        for chunk in enumerate(self.df_test_iterator):
+            test_df = self.replace_nan_with_median(chunk[1])
+            test_df = self.create_dependent_column(test_df)
+
+            mode = 'w' if chunk[0] == 0 else 'a'
+            header = chunk[0] == 0
+
+            test_df.to_csv(r'data/preprocessed/testing_VU_DM.csv', index=False,
+                           header=header,
+                           mode=mode)
+            print(f"——— successfully saved testing chunk {chunk[0]} predicitons ——— ")
+
+
+# train_path = "data/5000/training_data_5000.csv"
+# test_path = "data/2500/testing_data_2500.csv"
+# PreProcess(train_path, test_path)
