@@ -48,7 +48,7 @@ class Light_GBM:
         X_train = self.normalize(X_train)
         X_validation = self.normalize(X_validation)
 
-        model = lightgbm.LGBMRegressor()
+        model = lightgbm.LGBMRegressor(boosting_type='gbdt', device='gpu')
 
         y_train = pd.DataFrame(y_train)
 
@@ -70,5 +70,5 @@ class Light_GBM:
         return df
 
 
-example_file = "/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/Group118_Assn2/data/shortened_data_5000.csv"
+example_file = "data/shortened_data_5000.csv"
 Light_GBM(example_file)
