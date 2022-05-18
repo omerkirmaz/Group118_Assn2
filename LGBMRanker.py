@@ -4,10 +4,13 @@ import lightgbm
 
 from preprocessing import PreProcess
 from os.path import exists
-from sklearn.metrics import ndcg_score
 
 
 class Light_GBMRanker:
+
+    """
+    Light GBM Ranking model with sklearn API
+    """
 
     def __init__(self, train_filepath, test_filepath):
 
@@ -27,7 +30,8 @@ class Light_GBMRanker:
 
         self.LGBMRanker()
 
-    def train_model_preprocessing(self, chunk_dataframe):
+    @staticmethod
+    def train_model_preprocessing(chunk_dataframe):
 
         train_df = chunk_dataframe[:800]
         validation_df = chunk_dataframe[800:]
@@ -41,12 +45,6 @@ class Light_GBMRanker:
         y_validation = validation_df["ranking"]
 
         return qids_train, X_train, y_train, qids_validation, X_validation, y_validation
-
-    # def predictions_preprocess(self, prediction_dataframe):
-    #
-    #     data_df = PreProcess(prediction_dataframe).run()
-    #
-    #     return data_df
 
     def LGBMRanker(self):
 
@@ -104,7 +102,9 @@ class Light_GBMRanker:
                                              num_iteration=gbm_init.best_iteration_)
                 print(f"GBM_init: saving iteration == {training_chunk[0]}, done.")
 
-            #  PREDICTING THE PROPERTY LISTINGS
+            ####################################
+            # PREDICTING THE PROPERTY LISTINGS #
+            ####################################
 
         for pred_chunk in enumerate(self.df_test_iterator):
 
@@ -113,11 +113,8 @@ class Light_GBMRanker:
             X_test = pred_chunk[1]
             final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
             sorted_srchs = sorted(X_test['srch_id'].unique())
-            #print(sorted_srchs)
-            #sorted_srchs = X_test['srch_id'].unique().to_list().sort()
 
             for srch_id in enumerate(sorted_srchs):
-
                 X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
                 X_test_copy = X_test_per_site.copy()
                 X_test_per_site = X_test_per_site.drop(['srch_id', 'prop_id'], axis=1)
@@ -125,17 +122,12 @@ class Light_GBMRanker:
                 test_pred = self.model.predict(X_test_per_site)
                 X_test_copy['ranking'] = test_pred
 
-                # NOT QUITE SURE IF ITS SORTED IN THE CORRECT ORDER NOW
-
                 X_test_copy = X_test_copy.sort_values(by=['ranking'], ascending=False)
                 short_df = X_test_copy[['srch_id', 'prop_id']].copy()
                 final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
 
             mode = 'w' if pred_chunk[0] == 0 else 'a'
             header = pred_chunk[0] == 0
-
-            #final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
-            #final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
 
             final_predictions_df.to_csv(r'lightGBM_model/lgbm_ranker/predictions_ranker.csv', index=False,
                                         header=header,
@@ -166,7 +158,6 @@ else:
     run_large_file_LGBM = Light_GBMRanker(processed_training_filepath, processed_testing_filepath)
 
 
-
 class small_data_LGBMRanker:
 
     def __init__(self, train_filepath, test_filepath=None):
@@ -176,9 +167,9 @@ class small_data_LGBMRanker:
         self.LGBMRanker_example()
 
     def example_train_preprocessing(self):
-        data_df = PreProcess(self.df_train).run()
-        train_df = data_df[:800]
-        validation_df = data_df[800:]
+
+        train_df = self.df_train[:800]
+        validation_df = self.df_train[800:]
 
         qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
         X_train = train_df.drop(["srch_id", "position", 'property_id'], axis=1)
@@ -190,16 +181,11 @@ class small_data_LGBMRanker:
 
         return qids_train, X_train, y_train, qids_validation, X_validation, y_validation
 
-    def example_predictions_preprocess(self):
-        data_df = PreProcess(self.df_test).run()
-
-        return data_df
-
     def LGBMRanker_example(self):
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation, = \
             self.example_train_preprocessing()
 
-        X_test = self.example_predictions_preprocess()
+        X_test = self.df_train
 
         model = lightgbm.LGBMRanker(boosting_type='dart',
                                     objective="lambdarank",
