@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
 import lightgbm
+from sklearn.metrics import ndcg_score
 
-from preprocessing import PreProcess
 from os.path import exists
+from preprocessing import PreProcess
 
 
 class Light_GBMRanker:
-
     """
     Light GBM Ranking model with sklearn API
     """
@@ -62,7 +62,7 @@ class Light_GBMRanker:
                 self.model = lightgbm.LGBMRanker(
                     boosting_type='dart',
                     objective="lambdarank",
-                    metric="ndcg",
+                    metric='ndcg',
                     label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
                     learning_rate=0.0001,
                 )
@@ -72,9 +72,9 @@ class Light_GBMRanker:
                                      group=self.qids_train,
                                      eval_set=[(self.X_validation, self.y_validation)],
                                      eval_group=[self.qids_validation],
-                                     eval_at=10,
+                                     eval_at=5,
                                      verbose=10,
-                                     init_model='lightGBM_model/lgbm_ranker/lgb_ranker.txt'
+                                     init_model='lightGBM_model/lgbm_ranker/lgb_ranker.txt',
                                      )
                 gbm.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
                                         num_iteration=gbm.best_iteration_)
@@ -95,7 +95,7 @@ class Light_GBMRanker:
                                           group=self.qids_train,
                                           eval_set=[(self.X_validation, self.y_validation)],
                                           eval_group=[self.qids_validation],
-                                          eval_at=100,
+                                          eval_at=5,
                                           verbose=10,
                                           )
                 gbm_init.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
@@ -134,12 +134,12 @@ class Light_GBMRanker:
                                         mode=mode)
             print(f"——— successfully saved chunk{pred_chunk[0]} predicitons ——— ")
 
-    # def eval_ndcg(self, y_true, y_pred):
-    #
-    #     eval_score = ndcg_score(y_true, y_pred)
-    #     self.all_ndcg.append(eval_score)
-    #
-    #     return ['weighted_ndcg', eval_score, True]
+    def eval_ndcg(self, y_true, y_pred):
+
+        eval_score = ndcg_score(y_true, y_pred)
+        self.all_ndcg.append(eval_score)
+
+        return ['weighted_ndcg', eval_score, True]
 
 
 if exists('data/preprocessed/training_VU_DM.csv') and exists('data/preprocessed/testing_VU_DM.csv'):
@@ -161,8 +161,10 @@ else:
 class small_data_LGBMRanker:
 
     def __init__(self, train_filepath, test_filepath=None):
+
         self.df_train = pd.read_csv(train_filepath)
         self.df_test = pd.read_csv(test_filepath)
+        self.all_ndcg = []
 
         self.LGBMRanker_example()
 
@@ -172,12 +174,12 @@ class small_data_LGBMRanker:
         validation_df = self.df_train[800:]
 
         qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_train = train_df.drop(["srch_id", "position", 'property_id'], axis=1)
-        y_train = train_df["position"]
+        X_train = train_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
+        y_train = train_df["ranking"]
 
         qids_validation = validation_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_validation = validation_df.drop(["srch_id", "position", 'property_id'], axis=1)
-        y_validation = validation_df["position"]
+        X_validation = validation_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
+        y_validation = validation_df["ranking"]
 
         return qids_train, X_train, y_train, qids_validation, X_validation, y_validation
 
@@ -189,7 +191,8 @@ class small_data_LGBMRanker:
 
         model = lightgbm.LGBMRanker(boosting_type='dart',
                                     objective="lambdarank",
-                                    metric="ndcg",
+                                    metric='ndcg',
+                                    ndcg_at=5,
                                     label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)],
                                     learning_rate=0.0001
                                     )
@@ -200,32 +203,40 @@ class small_data_LGBMRanker:
             group=qids_train,
             eval_set=[(X_validation, y_validation)],
             eval_group=[qids_validation],
-            eval_at=10,
+            #eval_metric=self.eval_ndcg,
+            eval_at=5,
+            #ndcg_at=5,
             verbose=10,
+            # xe_ndcg_mart
         )
 
-        final_predictions_df = pd.DataFrame(columns=['srch_id', 'property_id'])
+        final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
+        sorted_srchs = sorted(X_test['srch_id'].unique())
 
-        for srch_id in enumerate(X_test['srch_id'].unique()):
+        for srch_id in enumerate(sorted_srchs):
             X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
             X_test_copy = X_test_per_site.copy()
-
-            del X_test_per_site['srch_id']
-            del X_test_per_site['property_id']
+            X_test_per_site = X_test_per_site.drop(['srch_id', 'prop_id'], axis=1)
 
             test_pred = model.predict(X_test_per_site)
-            X_test_copy['position'] = test_pred
+            X_test_copy['ranking'] = test_pred
 
-            # NOT QUITE SURE IF ITS SORTED IN THE CORRECT ORDER NOW
-
-            X_test_copy = X_test_copy.sort_values(by=['position'], ascending=False)
-            short_df = X_test_copy[['srch_id', 'property_id']].copy()
+            X_test_copy = X_test_copy.sort_values(by=['ranking'], ascending=False)
+            short_df = X_test_copy[['srch_id', 'prop_id']].copy()
             final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
 
         final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
         final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
         final_predictions_df.to_csv(r'data/test_data_5000_predictions.csv', index=False, header=True)
 
-# train_example_file = "data/shortened_data_5000.csv"
-# test_example_file = "data/shortened_test_data_5000.csv"
+    # def eval_ndcg(self, y_true, y_pred):
+    #
+    #     eval_score = ndcg_score(y_true, y_pred, k=5)
+    #     self.all_ndcg.append(eval_score)
+    #
+    #     return ['weighted_ndcg', eval_score, True]
+
+
+# train_example_file = "data/preprocessed/training_VU_DM.csv"
+# test_example_file = "data/preprocessed/testing_VU_DM.csv"
 # small_data_LGBMRanker(train_example_file, test_example_file)
