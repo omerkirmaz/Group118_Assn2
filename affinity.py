@@ -16,9 +16,6 @@ class LGBM_affinity:
 
     def __init__(self, filepath):
         self.df_train = pd.read_csv(filepath)
-        scaler = preprocessing.MinMaxScaler()
-        normalpos = scaler.fit_transform(self.df_train["position"].to_list())
-        self.df_train["position"] = normalpos
         # X_train, X_gold, y_train, y_gold = self.training_split()
 
         self.parameters = {'objective': 'lambdarank',
@@ -40,9 +37,10 @@ class LGBM_affinity:
     
     def training(self):
         del self.df_train["date_time"]
-        self.clean_train = self.affinity_clean(self.df_train)
-
-        variables = [i for i in self.clean_train.columns if i not in ["srch_query_affinity_score", "srch_id"]]
+        self.nnn = self.normalize(self.df_train)
+        self.clean_train = self.affinity_clean(self.nnn)
+      
+        variables = [i for i in self.clean_train.columns if i not in ["srch_query_affinity_score", "srch_id", "position"]]
         X = self.clean_train.loc[:, variables]
         Y = self.clean_train.loc[:, "srch_query_affinity_score"]
 
@@ -92,6 +90,27 @@ class LGBM_affinity:
     def affinity_clean(self, df):
         affinity_clean_df = df[df["srch_query_affinity_score"].notna()]
         return affinity_clean_df
+
+    def normalize(self, df):
+        ids = set(df["srch_id"])
+        df["new_pos"] = " "
+        for id in ids:
+            posid = df[df['srch_id']==id]["position"]
+            to_norm = np.array(posid)
+            to_norm2 = to_norm.reshape(-1,1)
+            scaler = preprocessing.MinMaxScaler()
+            normalpos = scaler.fit_transform(to_norm2)
+            npos = normalpos.flatten()
+            npos = npos.astype(float)
+            for i in range(len(normalpos)):
+                cond = (df['srch_id'] == id) & (df['position'] == to_norm[i])
+                df.loc[cond,'new_pos'] = npos[i]
+        df['new_pos'] = df['new_pos'].astype(float)
+        return df
+
+            
+
+
 
 
 example_file = "data/shortened_data_5000.csv"
