@@ -3,6 +3,7 @@ import pandas as pd
 import lightgbm
 from sklearn.metrics import ndcg_score
 from sklearn.model_selection import StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
 from sklearn_genetic import GASearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
@@ -173,6 +174,7 @@ class small_data_LGBMRanker:
 
         self.param_grid = param_grid
         self.cv = StratifiedKFold(n_splits=3, shuffle=True)
+        self.ensemble_df = pd.DataFrame()
 
     def example_train_preprocessing(self):
 
@@ -210,31 +212,95 @@ class small_data_LGBMRanker:
             verbose=-1,
         )
 
-        self.evaluate(model, True)
+        self.evaluate(model, 'LGBM_Ranker', True)
 
-    def log_regression(self):
+    def log_regression(self, ensemble):
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation, = self.example_train_preprocessing()
-        logreg_model = LogisticRegression(solver='sag', max_iter=1000)
-        logreg_model.fit(X_train, y_train)
-        self.evaluate(logreg_model, False)
+        model = LogisticRegression(solver='sag', max_iter=10000)
+        model.fit(X_train, y_train)
+        if ensemble:
+            return model
+        else:
+            self.evaluate(model, 'Logistic_Regression', False)
 
-    def lgbm_classifier(self):
+    def lgbm_classifier(self, ensemble):
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation, = self.example_train_preprocessing()
 
         model = lightgbm.LGBMClassifier(boosting_type='dart',
                                         label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)])
         model.fit(X_train, y_train)
-        self.evaluate(model, False)
+        if ensemble:
+            return model
+        else:
+            self.evaluate(model, 'LGBM_classifier', False)
 
-    def knn_classifier(self):
+    def knn_classifier(self, ensemble):
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation, = self.example_train_preprocessing()
 
         model = KNeighborsClassifier(n_neighbors=10)
         model.fit(X_train, y_train)
+        if ensemble:
+            return model
+        else:
+            self.evaluate(model, 'KNN', False)
 
-        self.evaluate(model, False)
+    def random_forest(self, ensemble):
+        qids_train, X_train, y_train, qids_validation, X_validation, y_validation, = self.example_train_preprocessing()
 
-    def evaluate(self, model, ranker):
+        model = RandomForestClassifier(n_estimators=100)
+        model.fit(X_train, y_train)
+        if ensemble:
+            return model
+        else:
+            self.evaluate(model, 'Random_Forest', False)
+
+    def ensemble(self):
+        lgbm = self.lgbm_classifier(True)
+        knn = self.knn_classifier(True)
+        forest = self.random_forest(True)
+        logreg = self.log_regression(True)
+        self.evaluate_ensemble([lgbm, knn, forest, logreg], ['lgbm', 'knn', 'forest', 'logreg'], 'median')
+
+    def evaluate_ensemble(self, models, modelnames, eval_method):
+        """
+        eval_method: either mean or median
+        """
+        sorted_srchs = sorted(self.df_test['srch_id'].unique())
+        searches_ranked = []
+        for srch_id in enumerate(sorted_srchs):
+            X_test_per_site = self.df_test[self.df_test['srch_id'] == srch_id[1]]
+            X_test_copy = X_test_per_site.copy()
+            X_test_per_site = X_test_per_site.drop(['srch_id', 'prop_id'], axis=1)
+
+            for i in range(len(models)):
+                test_pred = models[i].predict_proba(X_test_per_site).tolist()
+                column_name = 'ranking_{}'.format(modelnames[i])
+                X_test_copy[column_name] = test_pred
+                X_test_copy[['no_booking_prob_{}'.format(modelnames[i]),
+                             'clicked_prob_{}'.format(modelnames[i]),
+                             'booked_prob_{}'.format(modelnames[i])]] = pd.DataFrame(X_test_copy[column_name].tolist(),
+                                                                                     index=X_test_copy.index)
+            searches_ranked.append(X_test_copy)
+
+        final_df = pd.concat(searches_ranked, ignore_index=True)
+        final_df['mean_clicked'] = final_df.filter(like='clicked').mean(axis=1)
+        final_df['median_clicked'] = final_df.filter(like='clicked').median(axis=1)
+
+        final_df['mean_booked'] = final_df.filter(like='booked').mean(axis=1)
+        final_df['median_booked'] = final_df.filter(like='booked').median(axis=1)
+
+        final_df = final_df.sort_values(['{}_booked'.format(eval_method), '{}_clicked'.format(eval_method)], ascending=[False, False])
+
+        final_predictions_df = final_df[['srch_id', 'prop_id']].copy()
+        final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
+        final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
+        final_predictions_df.to_csv(r'data/test_data_2500_predictions.csv', index=False, header=True)
+
+        true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
+        sm = difflib.SequenceMatcher(None, final_predictions_df['prop_id'], true_vals['prop_id'])
+        print("Similarity score on test set for ensemble model is: " + str(sm.ratio()))
+
+    def evaluate(self, model, modelname, ranker):
         final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
         sorted_srchs = sorted(self.df_test['srch_id'].unique())
 
@@ -249,17 +315,21 @@ class small_data_LGBMRanker:
                 X_test_copy = X_test_copy.sort_values(['ranking'], ascending=False)
             else:
                 test_pred = model.predict_proba(X_test_per_site).tolist()
-                X_test_copy['ranking'] = test_pred
-                X_test_copy[['no_booking_prob', 'clicked_prob', 'booked_prob']] = pd.DataFrame(X_test_copy.ranking.tolist(), index=X_test_copy.index)
+                column_name = 'ranking_{}'.format(modelname)
+                X_test_copy[column_name] = test_pred
+                X_test_copy[['no_booking_prob', 'clicked_prob', 'booked_prob']] = pd.DataFrame(X_test_copy[column_name].tolist(), index=X_test_copy.index)
                 X_test_copy = X_test_copy.sort_values(['booked_prob', 'clicked_prob'], ascending=[False, False])
 
             short_df = X_test_copy[['srch_id', 'prop_id']].copy()
             final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
-            break
 
         final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
         final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
         final_predictions_df.to_csv(r'data/test_data_2500_predictions.csv', index=False, header=True)
+
+        true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
+        sm = difflib.SequenceMatcher(None, final_predictions_df['prop_id'], true_vals['prop_id'])
+        print("Similarity score on test set for {} is: ".format(modelname) + str(sm.ratio()))
 
     def eval_ndcg(self, y_true, y_pred):
 
@@ -270,6 +340,7 @@ class small_data_LGBMRanker:
 
 
 """unprocessed_training_filepath = "data/5000/training_data_5000.csv"  # these file paths will differ from yours
+        
 unprocessed_testing_filepath = "data/2500/testing_data_2500.csv"  # these file paths will differ from yours
 PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)"""
 
@@ -287,28 +358,10 @@ param_grid = {'learning_rate': Continuous(0.00001, 0.5, distribution='log-unifor
               }
 
 lgbm = small_data_LGBMRanker(processed_training_filepath, param_grid, processed_testing_filepath)
-lgbm.lgbm_ranker()
-predictions = pd.read_csv('data/test_data_2500_predictions.csv')
-true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
-sm = difflib.SequenceMatcher(None, predictions['prop_id'], true_vals['prop_id'])
-print("Similarity score of test set is: " + str(sm.ratio() * 100))
 
-lgbm.log_regression()
-predictions = pd.read_csv('data/test_data_2500_predictions.csv')
-true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
-sm = difflib.SequenceMatcher(None, predictions['prop_id'], true_vals['prop_id'])
-print("Similarity score of test set is: " + str(sm.ratio() * 100))
-
-lgbm.lgbm_classifier()
-predictions = pd.read_csv('data/test_data_2500_predictions.csv')
-true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
-sm = difflib.SequenceMatcher(None, predictions['prop_id'], true_vals['prop_id'])
-print("Similarity score of test set is: " + str(sm.ratio() * 100))
-
-lgbm.knn_classifier()
-predictions = pd.read_csv('data/test_data_2500_predictions.csv')
-true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
-sm = difflib.SequenceMatcher(None, predictions['prop_id'], true_vals['prop_id'])
-print("Similarity score of test set is: " + str(sm.ratio() * 100))
-
-
+#lgbm.lgbm_ranker()
+"""lgbm.log_regression(False)
+lgbm.lgbm_classifier(False)
+lgbm.knn_classifier(False)
+lgbm.random_forest(False)"""
+lgbm.ensemble()
