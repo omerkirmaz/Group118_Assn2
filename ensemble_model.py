@@ -14,157 +14,6 @@ import pickle
 from preprocessing import PreProcess
 
 
-class Light_GBMRanker:
-    """
-    Light GBM Ranking model with sklearn API
-    """
-
-    def __init__(self, train_filepath, test_filepath):
-
-        self.df_train_iterator = pd.read_csv(train_filepath, chunksize=100000)
-        self.df_test_iterator = pd.read_csv(test_filepath, chunksize=100000)
-
-        self.qids_train = None
-        self.X_train = None
-        self.y_train = np.array([])
-        self.qids_validation = None
-        self.X_validation = None
-        self.y_validation = np.array([])
-
-        self.all_ndcg = []
-
-        self.model = lightgbm.LGBMRanker()
-
-        self.LGBMRanker()
-
-    @staticmethod
-    def train_model_preprocessing(chunk_dataframe):
-
-        train_df = chunk_dataframe[:800]
-        validation_df = chunk_dataframe[800:]
-
-        qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_train = train_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
-        y_train = train_df["ranking"]
-
-        qids_validation = validation_df.groupby("srch_id")["srch_id"].count().to_numpy()
-        X_validation = validation_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
-        y_validation = validation_df["ranking"]
-
-        return qids_train, X_train, y_train, qids_validation, X_validation, y_validation
-
-    def LGBMRanker(self):
-
-        for training_chunk in enumerate(self.df_train_iterator):
-
-            print(f'TRAINING DATA PREPROCESSING —— TRAINING CHUNK: {training_chunk[0]}')
-
-            self.qids_train, self.X_train, self.y_train, self.qids_validation, self.X_validation, self.y_validation = \
-                self.train_model_preprocessing(training_chunk[1])
-
-            print('done.')
-
-            if exists('lightGBM_model/lgbm_ranker/lgb_ranker.txt'):
-
-                self.model = lightgbm.LGBMRanker(
-                    boosting_type='dart',
-                    objective="lambdarank",
-                    metric='ndcg',
-                    label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
-                    learning_rate=0.0001,
-                )
-
-                gbm = self.model.fit(X=self.X_train,
-                                     y=self.y_train,
-                                     group=self.qids_train,
-                                     eval_set=[(self.X_validation, self.y_validation)],
-                                     eval_group=[self.qids_validation],
-                                     eval_at=5,
-                                     verbose=10,
-                                     init_model='lightGBM_model/lgbm_ranker/lgb_ranker.txt',
-                                     )
-                gbm.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
-                                        num_iteration=gbm.best_iteration_)
-                print(f"GBM: Saving iteration {training_chunk[0]} —— done.")
-
-            else:
-
-                self.model = lightgbm.LGBMRanker(
-                    boosting_type='dart',
-                    objective="lambdarank",
-                    metric="ndcg",
-                    label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
-                    learning_rate=0.0001
-                )
-
-                gbm_init = self.model.fit(X=self.X_train,
-                                          y=self.y_train,
-                                          group=self.qids_train,
-                                          eval_set=[(self.X_validation, self.y_validation)],
-                                          eval_group=[self.qids_validation],
-                                          eval_at=5,
-                                          verbose=10,
-                                          )
-                gbm_init.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
-                                             num_iteration=gbm_init.best_iteration_)
-                print(f"GBM_init: saving iteration == {training_chunk[0]}, done.")
-
-            ####################################
-            # PREDICTING THE PROPERTY LISTINGS #
-            ####################################
-
-        for pred_chunk in enumerate(self.df_test_iterator):
-
-            print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[0]}')
-
-            X_test = pred_chunk[1]
-            final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
-            sorted_srchs = sorted(X_test['srch_id'].unique())
-
-            for srch_id in enumerate(sorted_srchs):
-                X_test_per_site = X_test[X_test['srch_id'] == srch_id[1]]
-                X_test_copy = X_test_per_site.copy()
-                X_test_per_site = X_test_per_site.drop(['srch_id', 'prop_id'], axis=1)
-
-                test_pred = self.model.predict(X_test_per_site)
-                X_test_copy['ranking'] = test_pred
-
-                X_test_copy = X_test_copy.sort_values(by=['ranking'], ascending=False)
-                short_df = X_test_copy[['srch_id', 'prop_id']].copy()
-                final_predictions_df = pd.concat([final_predictions_df, short_df], ignore_index=True)
-
-            mode = 'w' if pred_chunk[0] == 0 else 'a'
-            header = pred_chunk[0] == 0
-
-            final_predictions_df.to_csv(r'lightGBM_model/lgbm_ranker/predictions_ranker.csv', index=False,
-                                        header=header,
-                                        mode=mode)
-            print(f"——— successfully saved chunk{pred_chunk[0]} predicitons ——— ")
-
-    def eval_ndcg(self, y_true, y_pred):
-
-        eval_score = ndcg_score(y_true, y_pred)
-        self.all_ndcg.append(eval_score)
-
-        return ['weighted_ndcg', eval_score, True]
-
-
-"""if exists('data/preprocessed/training_VU_DM.csv') and exists('data/preprocessed/testing_VU_DM.csv'):
-
-    training_filepath = "data/preprocessed/training_VU_DM.csv"
-    testing_filepath = "data/preprocessed/testing_VU_DM.csv"
-    run_large_file_LGBM = Light_GBMRanker(training_filepath, testing_filepath)
-
-else:
-    unprocessed_training_filepath = "../original_data/training_set_VU_DM.csv"  # these file paths will differ from yours
-    unprocessed_testing_filepath = "../original_data/test_set_VU_DM.csv"  # these file paths will differ from yours
-    PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)
-
-    processed_training_filepath = "data/preprocessed/training_VU_DM.csv"
-    processed_testing_filepath = "data/preprocessed/testing_VU_DM.csv"
-    run_large_file_LGBM = Light_GBMRanker(processed_training_filepath, processed_testing_filepath)"""
-
-
 class RankInstances:
 
     def __init__(self, train_filepath, param_grid, test_filepath=None):
@@ -186,6 +35,9 @@ class RankInstances:
         self.process_data()
 
     def process_data(self):
+        """
+        Process all chunks from the training data
+        """
         for training_chunk in enumerate(self.df_train_iterator):
 
             print(f'TRAINING DATA PREPROCESSING —— TRAINING CHUNK: {training_chunk[0]}')
@@ -195,7 +47,10 @@ class RankInstances:
             print('done.')
 
     def train_model_preprocessing(self, chunk_dataframe):
-
+        """
+        Drop irrelevant columns from data and split the data
+        :param chunk_dataframe: chunk of data to process
+        """
         train_df = chunk_dataframe[:800]
         validation_df = chunk_dataframe[800:]
 
@@ -208,6 +63,9 @@ class RankInstances:
         self.y_validation = validation_df["ranking"]
 
     def lgbm_ranker(self):
+        """
+        Make LGBM ranking model, fit it and evaluate performance
+        """
         model = lightgbm.LGBMRanker(boosting_type='dart',
                                     objective="lambdarank",
                                     metric='ndcg',
@@ -230,6 +88,11 @@ class RankInstances:
         self.evaluate(model, 'LGBM_Ranker', True)
 
     def log_regression(self, ensemble):
+        """
+        Define classifier, train it, and evaluate it/ return it for further processing in the ensemble algorithm
+        :param ensemble: whether the model will be combined into an ensemble model
+        :return: model will be returned if it is to be combined into an ensemble model
+        """
         model = LogisticRegression(solver='sag', max_iter=10000)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/log_regression.sav', 'wb'))
@@ -239,6 +102,11 @@ class RankInstances:
             self.evaluate(model, 'Logistic_Regression', False)
 
     def lgbm_classifier(self, ensemble):
+        """
+        Define classifier, train it, and evaluate it/ return it for further processing in the ensemble algorithm
+        :param ensemble: whether the model will be combined into an ensemble model
+        :return: model will be returned if it is to be combined into an ensemble model
+        """
         model = lightgbm.LGBMClassifier(boosting_type='dart',
                                         label_gain=[i for i in range(max(max(self.y_train), max(self.y_validation)) + 1)])
         model.fit(self.X_train, self.y_train)
@@ -249,6 +117,11 @@ class RankInstances:
             self.evaluate(model, 'LGBM_classifier', False)
 
     def knn_classifier(self, ensemble):
+        """
+        Define classifier, train it, and evaluate it/ return it for further processing in the ensemble algorithm
+        :param ensemble: whether the model will be combined into an ensemble model
+        :return: model will be returned if it is to be combined into an ensemble model
+        """
         model = KNeighborsClassifier(n_neighbors=10)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/knn_classifier.sav', 'wb'))
@@ -258,6 +131,11 @@ class RankInstances:
             self.evaluate(model, 'KNN', False)
 
     def random_forest(self, ensemble):
+        """
+        Define classifier, train it, and evaluate it/ return it for further processing in the ensemble algorithm
+        :param ensemble: whether the model will be combined into an ensemble model
+        :return: model will be returned if it is to be combined into an ensemble model
+        """
         model = RandomForestClassifier(n_estimators=100)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/random_forest.sav', 'wb'))
@@ -267,24 +145,34 @@ class RankInstances:
             self.evaluate(model, 'Random_Forest', False)
 
     def ensemble(self):
+        """
+        Obtain fitted models, and obtain the rankings for all of them.
+        The resulting ordered dataframe is saved for later review
+        """
         lgbm = self.lgbm_classifier(True)
         knn = self.knn_classifier(True)
         forest = self.random_forest(True)
         logreg = self.log_regression(True)
         for pred_chunk in enumerate(self.df_test_iterator):
 
-            print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[1]}')
+            print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[0]}')
             predictions_df = self.evaluate_ensemble([lgbm, knn, forest, logreg], ['lgbm', 'knn', 'forest', 'logreg'],
-                                                    'median', pred_chunk[1])
+                                                    'mean', pred_chunk[1])
 
             mode = 'w' if pred_chunk[0] == 0 else 'a'
             header = pred_chunk[0] == 0
             predictions_df.to_csv('predictions/ensemble/prediction.csv', index=False, header=header, mode=mode)
-            print(f"——— successfully saved chunk{pred_chunk[0]} predictions ——— ")
+            print(f"——— successfully saved chunk {pred_chunk[0]} predictions ——— ")
 
-    def evaluate_ensemble(self, models, modelnames, eval_method, df_test):
+    @staticmethod
+    def evaluate_ensemble(models, modelnames, eval_method, df_test):
         """
-        eval_method: either mean or median
+        Evaluate a chunk of the test data using the selected models and combine the different rankings into one score
+        :param models: list of the models to be used for the ensemble
+        :param modelnames: the names of the respective models
+        :param eval_method: Whether the mean or the median is used to calculate scores
+        :param df_test: The test set to evaluate on
+        :return: A sorted dataframe containing the search and property ID
         """
         sorted_srchs = sorted(df_test['srch_id'].unique())
         searches_ranked = []
@@ -320,6 +208,12 @@ class RankInstances:
         return final_predictions_df
 
     def evaluate(self, model, modelname, ranker):
+        """
+        Rank for all chunks of the test set using a provided model
+        :param model: The model to evaluate
+        :param modelname: The name of the model to evaluate
+        :param ranker: If the lgbm_ranker is used, the evaluation has to account for the different method
+        """
         for pred_chunk in enumerate(self.df_test_iterator):
             print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[0]}')
             X_test = pred_chunk[1]
@@ -387,12 +281,13 @@ lgbm = RankInstances(processed_training_filepath, param_grid, processed_testing_
 #lgbm.lgbm_ranker()
 """lgbm.log_regression(False)
 lgbm.lgbm_classifier(False)
-lgbm.knn_classifier(False)
-lgbm.random_forest(False)"""
+lgbm.knn_classifier(False)"""
+#lgbm.random_forest(False)
 lgbm.ensemble()
 
 
+# Calculate similarity score between predicted and gold data
 true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
-predicted = pd.read_csv('predictions/ensemble/prediction.csv')
+predicted = pd.read_csv('predictions/single_method/random_forest.csv')
 sm = difflib.SequenceMatcher(None, predicted['prop_id'], true_vals['prop_id'])
 print("Similarity score on test set for ensemble is: " + str(sm.ratio()))
