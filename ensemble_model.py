@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import lightgbm
 from sklearn.metrics import ndcg_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn_genetic import GASearchCV
 from sklearn.neighbors import KNeighborsClassifier
@@ -24,8 +24,11 @@ class RankInstances:
         self.df_full_train = pd.read_csv(train_filepath)
 
         self.qids_train = self.df_full_train.groupby("srch_id")["srch_id"].count().to_numpy()
-        self.X_train = self.df_full_train.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
-        self.y_train = self.df_full_train["ranking"]
+        self.X = self.df_full_train.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
+        self.y = self.df_full_train["ranking"]
+
+        self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X, self.y, test_size=0.25,
+                                                                              random_state=42)
 
         #self.qids_validation = validation_df.groupby("srch_id")["srch_id"].count().to_numpy()
         #self.X_validation = validation_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
@@ -97,13 +100,14 @@ class RankInstances:
         :param ensemble: whether the model will be combined into an ensemble model
         :return: model will be returned if it is to be combined into an ensemble model
         """
-        model = LogisticRegression(solver='sag', max_iter=10000)
+        model = LogisticRegression(verbose=1, solver='sag', max_iter=1000)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/log_regression.sav', 'wb'))
         if ensemble:
             return model
         else:
-            self.evaluate(model, 'Logistic_Regression', False)
+            pass
+            #self.evaluate(model, 'Logistic_Regression', False)
 
     def lgbm_classifier(self, ensemble):
         """
@@ -112,7 +116,8 @@ class RankInstances:
         :return: model will be returned if it is to be combined into an ensemble model
         """
         model = lightgbm.LGBMClassifier(boosting_type='dart',
-                                        label_gain=[i for i in range(max(max(self.y_train), max(self.y_validation)) + 1)])
+                                        label_gain=[i for i in range(max(max(self.y_train), max(self.y_val)) + 1)],
+                                        learning_rate=0.0001)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/lgbm_classifier.sav', 'wb'))
         if ensemble:
@@ -140,13 +145,14 @@ class RankInstances:
         :param ensemble: whether the model will be combined into an ensemble model
         :return: model will be returned if it is to be combined into an ensemble model
         """
-        model = RandomForestClassifier(n_estimators=100)
+        model = RandomForestClassifier(n_estimators=50, max_depth=50)
         model.fit(self.X_train, self.y_train)
         pickle.dump(model, open('models/random_forest.sav', 'wb'))
         if ensemble:
             return model
         else:
-            self.evaluate(model, 'Random_Forest', False)
+            #self.evaluate(model, 'Random_Forest', False)
+            pass
 
     def ensemble(self):
         """
@@ -290,16 +296,40 @@ param_grid = {'learning_rate': Continuous(0.00001, 0.5, distribution='log-unifor
 
 lgbm = RankInstances(processed_training_filepath, param_grid, processed_testing_filepath)
 
-#lgbm.lgbm_ranker()
-"""lgbm.log_regression(False)
-lgbm.lgbm_classifier(False)
-lgbm.knn_classifier(False)"""
+#lgbm.log_regression(False)
+#lgbm.lgbm_classifier(False)
+#lgbm.knn_classifier(False)
 #lgbm.random_forest(False)
-lgbm.ensemble()
+#lgbm.ensemble()
 #lgbm.log_regression(False)
 
+lgbm_classifier = pickle.load(open('models/lgbm_classifier.sav', 'rb'))
+lgbm.evaluate(lgbm_classifier, 'lgbm', False)
+
+def evaluate_saved_models():
+    # Evaluate saved model
+    #knn_model = pickle.load(open('models/knn_classifier.sav', 'rb'))
+    lgbm_classifier = pickle.load(open('models/lgbm_classifier.sav', 'rb'))
+    log_regression = pickle.load(open('models/log_regression.sav', 'rb'))
+    random_forest = pickle.load(open('models/random_forest.sav', 'rb'))
+
+    models = [lgbm_classifier, log_regression, random_forest]
+    model_names = ['lgbm', 'log_regression', 'random_forest']
+
+    for pred_chunk in enumerate(lgbm.df_test_iterator):
+        start = time.time()
+        print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[0]}')
+        predictions_df = lgbm.evaluate_ensemble(models, model_names, 'mean', pred_chunk[1])
+        mode = 'w' if pred_chunk[0] == 0 else 'a'
+        header = pred_chunk[0] == 0
+        predictions_df.to_csv('predictions/ensemble/prediction.csv', index=False, header=header, mode=mode)
+        print(f"——— successfully saved chunk {pred_chunk[0]} predictions ——— ")
+        print('Chunk {} took {} seconds to evaluate'.format(pred_chunk[0], time.time() - start))
+
+#evaluate_saved_models()
+
 # Calculate similarity score between predicted and gold data
-true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
+"""true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
 predicted = pd.read_csv('predictions/single_method/random_forest.csv')
 sm = difflib.SequenceMatcher(None, predicted['prop_id'], true_vals['prop_id'])
-print("Similarity score on test set for ensemble is: " + str(sm.ratio()))
+print("Similarity score on test set for ensemble is: " + str(sm.ratio()))"""
