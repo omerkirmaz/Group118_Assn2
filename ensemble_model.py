@@ -11,6 +11,7 @@ from sklearn_genetic.space import Continuous, Categorical, Integer
 from os.path import exists
 import difflib
 import pickle
+import time
 from preprocessing import PreProcess
 
 
@@ -20,19 +21,22 @@ class RankInstances:
         self.df_train_iterator = pd.read_csv(train_filepath, chunksize=100000)
         self.df_test_iterator = pd.read_csv(test_filepath, chunksize=100000)
 
-        self.qids_train = None
-        self.X_train = None
-        self.y_train = []
-        self.qids_validation = None
-        self.X_validation = None
-        self.y_validation = []
+        self.df_full_train = pd.read_csv(train_filepath)
+
+        self.qids_train = self.df_full_train.groupby("srch_id")["srch_id"].count().to_numpy()
+        self.X_train = self.df_full_train.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
+        self.y_train = self.df_full_train["ranking"]
+
+        #self.qids_validation = validation_df.groupby("srch_id")["srch_id"].count().to_numpy()
+        #self.X_validation = validation_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
+        #self.y_validation = validation_df["ranking"]
 
         self.all_ndcg = []
 
         self.param_grid = param_grid
         self.cv = StratifiedKFold(n_splits=3, shuffle=True)
 
-        self.process_data()
+        #self.process_data()
 
     def process_data(self):
         """
@@ -149,10 +153,19 @@ class RankInstances:
         Obtain fitted models, and obtain the rankings for all of them.
         The resulting ordered dataframe is saved for later review
         """
+        start_time = time.time()
         lgbm = self.lgbm_classifier(True)
+        print('LGBM fitted after {} seconds'.format(time.time() - start_time))
+        start_time = time.time()
         knn = self.knn_classifier(True)
+        print('KNN fitted after {} seconds'.format(time.time() - start_time))
+        start_time = time.time()
         forest = self.random_forest(True)
+        print('Random forest fitted after {} seconds'.format(time.time() - start_time))
+        start_time = time.time()
         logreg = self.log_regression(True)
+        print('Logistic Regression fitted after {} seconds'.format(time.time() - start_time))
+
         for pred_chunk in enumerate(self.df_test_iterator):
 
             print(f'TESTING DATA PREDICTIONS —— TESTING CHUNK: {pred_chunk[0]}')
@@ -258,10 +271,9 @@ class RankInstances:
         return ['weighted_ndcg', eval_score, True]
 
 
-"""unprocessed_training_filepath = "data/5000/training_data_5000.csv"  # these file paths will differ from yours
-        
-unprocessed_testing_filepath = "data/2500/testing_data_2500.csv"  # these file paths will differ from yours
-PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)"""
+#unprocessed_training_filepath = "data/full_data/training_set_VU_DM.csv"  # these file paths will differ from yours
+#unprocessed_testing_filepath = "data/full_data/test_set_VU_DM.csv"  # these file paths will differ from yours
+#PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)
 
 processed_training_filepath = "data/preprocessed/training_VU_DM.csv"
 processed_testing_filepath = "data/preprocessed/testing_VU_DM.csv"
@@ -284,7 +296,7 @@ lgbm.lgbm_classifier(False)
 lgbm.knn_classifier(False)"""
 #lgbm.random_forest(False)
 lgbm.ensemble()
-
+#lgbm.log_regression(False)
 
 # Calculate similarity score between predicted and gold data
 true_vals = pd.read_csv('data/2500/gold_data_2500.csv')
