@@ -18,26 +18,16 @@ class PreProcess:
         self.save_train()
         self.save_test()
 
-    def cut_columns(self, norm_df):
-
-        if 'date_time' in norm_df.columns:
-            del norm_df['date_time']
-
-        if 'click_bool' in norm_df.columns:
-            del norm_df['click_bool']
-
-        if 'booking_bool' in norm_df.columns:
-            del norm_df['booking_bool']
-
-        if 'gross_bookings_usd' in norm_df.columns:
-            del norm_df['gross_bookings_usd']
+    def cut_columns(self, norm_df, delete_columns):
+        for column in delete_columns:
+            if column in norm_df.columns:
+                del norm_df[column]
 
         return norm_df
 
-    def replace_nan_with_median(self, data_df):
+    def fill_na(self, data_df):
 
-        nan_columns = ["visitor_hist_starrating", "visitor_hist_adr_usd", "prop_review_score",
-                       "orig_destination_distance"]
+        nan_columns = ["prop_review_score", "orig_destination_distance"]
 
         for col in nan_columns:
             median = data_df[col].median()
@@ -84,13 +74,31 @@ class PreProcess:
             return normalized_df
 
     def save_train(self):
+        del_columns = [
+            'date_time',
+            'site_id',
+            'visitor_location_country_id',
+            'visitor_hist_adr_usd',
+            'prop_country_id',
+            'prop_brand_bool',
+            'promotion_flag',
+            'srch_destination_id',
+            'random_bool',
+            'srch_saturday_night_bool',
+            'srch_query_affinity_score',
+        ]
 
         for chunk in enumerate(self.df_train_iterator):
             print(f'PREPROCESSING CHUNK {chunk[0]}')
             train_df = chunk[1]
-
-            train_df = self.replace_nan_with_median(data_df=train_df)
+            for i in range(1, 9):
+                rate = 'comp' + str(i) + '_rate'
+                inv = 'comp' + str(i) + '_inv'
+                diff = 'comp' + str(i) + '_rate_percent_diff'
+                del_columns.extend([rate, inv, diff])
             train_df = self.create_dependent_column(train_df)
+            train_df = self.cut_columns(train_df, del_columns)
+            train_df = self.fill_na(data_df=train_df)
 
             mode = 'w' if chunk[0] == 0 else 'a'
             header = chunk[0] == 0
@@ -102,10 +110,31 @@ class PreProcess:
             print(f"——— successfully saved chunk {chunk[0]} ——— ")
 
     def save_test(self):
+        del_columns = [
+            'date_time',
+            'site_id',
+            'visitor_location_country_id',
+            'visitor_hist_adr_usd',
+            'prop_country_id',
+            'prop_brand_bool',
+            'promotion_flag',
+            'srch_destination_id',
+            'random_bool',
+            'srch_saturday_night_bool',
+            'srch_query_affinity_score',
+        ]
 
         for chunk in enumerate(self.df_test_iterator):
-            test_df = self.replace_nan_with_median(chunk[1])
+            test_df = chunk[1]
+
+            for i in range(1, 9):
+                rate = 'comp' + str(i) + '_rate'
+                inv = 'comp' + str(i) + '_inv'
+                diff = 'comp' + str(i) + '_rate_percent_diff'
+                del_columns.extend([rate, inv, diff])
             test_df = self.create_dependent_column(test_df)
+            test_df = self.cut_columns(test_df, del_columns)
+            test_df = self.fill_na(test_df)
 
             mode = 'w' if chunk[0] == 0 else 'a'
             header = chunk[0] == 0
