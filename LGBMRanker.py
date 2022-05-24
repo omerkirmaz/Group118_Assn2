@@ -4,7 +4,8 @@ import lightgbm
 from sklearn.metrics import ndcg_score
 
 from os.path import exists
-from preprocessing import PreProcess
+from Preprocessing.preprocessing_LGBM import PreProcess
+from ndcg import ndcg_score
 
 
 class Light_GBMRanker:
@@ -33,8 +34,9 @@ class Light_GBMRanker:
     @staticmethod
     def train_model_preprocessing(chunk_dataframe):
 
-        train_df = chunk_dataframe[:800]
-        validation_df = chunk_dataframe[800:]
+        train_size = round(len(chunk_dataframe) * 0.8)
+        train_df = chunk_dataframe[:train_size]
+        validation_df = chunk_dataframe[train_size:]
 
         qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
         X_train = train_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
@@ -57,7 +59,7 @@ class Light_GBMRanker:
 
             print('done.')
 
-            if exists('lightGBM_model/lgbm_ranker/lgb_ranker.txt'):
+            if exists('lgb_ranker.txt'):
 
                 self.model = lightgbm.LGBMRanker(
                     boosting_type='dart',
@@ -74,9 +76,9 @@ class Light_GBMRanker:
                                      eval_group=[self.qids_validation],
                                      eval_at=5,
                                      verbose=10,
-                                     init_model='lightGBM_model/lgbm_ranker/lgb_ranker.txt',
+                                     init_model='lgb_ranker.txt',
                                      )
-                gbm.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
+                gbm.booster_.save_model('lgb_ranker.txt',
                                         num_iteration=gbm.best_iteration_)
                 print(f"GBM: Saving iteration {training_chunk[0]} —— done.")
 
@@ -98,7 +100,7 @@ class Light_GBMRanker:
                                           eval_at=5,
                                           verbose=10,
                                           )
-                gbm_init.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
+                gbm_init.booster_.save_model('lgb_ranker.txt',
                                              num_iteration=gbm_init.best_iteration_)
                 print(f"GBM_init: saving iteration == {training_chunk[0]}, done.")
 
@@ -129,23 +131,23 @@ class Light_GBMRanker:
             mode = 'w' if pred_chunk[0] == 0 else 'a'
             header = pred_chunk[0] == 0
 
-            final_predictions_df.to_csv(r'lightGBM_model/lgbm_ranker/predictions_ranker.csv', index=False,
+            final_predictions_df.to_csv(r'predictions_ranker.csv', index=False,
                                         header=header,
                                         mode=mode)
             print(f"——— successfully saved chunk{pred_chunk[0]} predicitons ——— ")
 
-    def eval_ndcg(self, y_true, y_pred):
+    # def eval_ndcg(self, y_true, y_pred):
+    #
+    #     eval_score = ndcg_score(y_true, y_pred)
+    #     self.all_ndcg.append(eval_score)
+    #
+    #     return ['weighted_ndcg', eval_score, True]
 
-        eval_score = ndcg_score(y_true, y_pred)
-        self.all_ndcg.append(eval_score)
 
-        return ['weighted_ndcg', eval_score, True]
+if exists('/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/training_VU_DM.csv') and exists('/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/testing_VU_DM.csv'):
 
-
-if exists('data/preprocessed/training_VU_DM.csv') and exists('data/preprocessed/testing_VU_DM.csv'):
-
-    training_filepath = "data/preprocessed/training_VU_DM.csv"
-    testing_filepath = "data/preprocessed/testing_VU_DM.csv"
+    training_filepath = "/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/training_VU_DM.csv"
+    testing_filepath = "/Users/omerkirmaz/Documents/VRIJE/Master/Year_1/P5/DMT/As2/testing_VU_DM.csv"
     run_large_file_LGBM = Light_GBMRanker(training_filepath, testing_filepath)
 
 else:
@@ -227,16 +229,31 @@ class small_data_LGBMRanker:
 
         final_predictions_df = final_predictions_df.sort_values(by=['srch_id'], ascending=True)
         final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
-        final_predictions_df.to_csv(r'data/test_data_5000_predictions.csv', index=False, header=True)
-
-    # def eval_ndcg(self, y_true, y_pred):
-    #
-    #     eval_score = ndcg_score(y_true, y_pred, k=5)
-    #     self.all_ndcg.append(eval_score)
-    #
-    #     return ['weighted_ndcg', eval_score, True]
+        final_predictions_df.to_csv(r'data/predictions/LGBM_test_data_5000_predictions.csv', index=False, header=True)
 
 
-# train_example_file = "data/preprocessed/training_VU_DM.csv"
-# test_example_file = "data/preprocessed/testing_VU_DM.csv"
-# small_data_LGBMRanker(train_example_file, test_example_file)
+
+
+
+
+
+# SHORT DATASET IN CASE THE LARGE DATASET IS OVERKILL
+training_path = "data/training_set_VU_DM.csv"
+testing_path = "data/test_set_VU_DM.csv"
+
+# LARGE DATASETS EXPEDIA HOTEL PREDICTIONS
+short_train = "data/5000/training_data_5000.csv"
+short_test = "data/2500/testing_data_2500.csv"
+
+# IF THE MODEL SHOULD BE EVALUATED, USE THESE FILEPATHS !!!
+TRAIN_PATH = "data/training_set_VU_DM.csv"
+TEST_PATH = "data/2500/testing_data_2500.csv"
+
+if __name__ == "__main__":
+    LightGBM = Light_GBMRanker(training_path, testing_path)
+    LightGBM.LGBMRanker()
+
+
+    evaluation = ndcg_score(true_filepath='data/2500/gold_data_2500.csv',
+                             pred_filepath='data/predictions/LGBM_test_data_5000_predictions.csv')
+    print('nDCG score ==', evaluation)
