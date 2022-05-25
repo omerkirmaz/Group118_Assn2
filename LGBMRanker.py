@@ -4,8 +4,9 @@ import lightgbm
 import sklearn
 from sklearn.metrics import ndcg_score, make_scorer
 from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingGridSearchCV, GroupKFold
-
+from sklearn.model_selection import HalvingGridSearchCV, HalvingRandomSearchCV, StratifiedKFold
+import statistics
+from sklearn.metrics import dcg_score
 from os.path import exists
 from preprocessing import PreProcess
 
@@ -36,8 +37,8 @@ class Light_GBMRanker:
     @staticmethod
     def train_model_preprocessing(chunk_dataframe):
 
-        train_df = chunk_dataframe[:80000]
-        validation_df = chunk_dataframe[80000:]
+        train_df = chunk_dataframe[:int(len(chunk_dataframe) * 0.8)]
+        validation_df = chunk_dataframe[int(len(chunk_dataframe) * 0.8):]
 
         qids_train = train_df.groupby("srch_id")["srch_id"].count().to_numpy()
         X_train = train_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
@@ -63,11 +64,19 @@ class Light_GBMRanker:
             if exists('lightGBM_model/lgbm_ranker/lgb_ranker.txt'):
 
                 self.model = lightgbm.LGBMRanker(
-                    boosting_type='dart',
+                    boosting_type='gbdt',
                     objective="lambdarank",
                     metric='ndcg',
                     label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
-                    learning_rate=0.0001,
+                    learning_rate=0.005,
+                    num_iterations=500,
+                    max_bin=500,
+                    num_leaves=100,
+
+                    early_stopping_round=100,
+                    min_data_in_leaf=500,
+                    bagging_freq=20,
+                    bagging_fraq=0.8
                 )
 
                 gbm = self.model.fit(X=self.X_train,
@@ -77,14 +86,9 @@ class Light_GBMRanker:
                                      eval_group=[self.qids_validation],
                                      eval_at=5,
                                      verbose=10,
-                                     categorical_feature=['visitor_location_country_id',
-                                                          'prop_country_id',
-                                                          'prop_brand_bool',
-                                                          'promotion_flag',
-                                                          'srch_destination_id',
-                                                          ],
                                      init_model='lightGBM_model/lgbm_ranker/lgb_ranker.txt'
                                      )
+
                 gbm.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
                                         num_iteration=gbm.best_iteration_)
                 print(f"GBM: Saving iteration {training_chunk[0]} —— done.")
@@ -92,11 +96,19 @@ class Light_GBMRanker:
             else:
 
                 self.model = lightgbm.LGBMRanker(
-                    boosting_type='dart',
+                    boosting_type='gbdt',
                     objective="lambdarank",
                     metric="ndcg",
                     label_gain=[i for i in range(max(self.y_train.max(), self.y_validation.max()) + 1)],
-                    learning_rate=0.0001
+                    learning_rate=0.005,
+                    num_iterations=500,
+                    max_bin=500,
+                    num_leaves=100,
+
+                    early_stopping_round=100,
+                    min_data_in_leaf=500,
+                    bagging_freq=20,
+                    bagging_fraq=0.8
                 )
 
                 gbm_init = self.model.fit(X=self.X_train,
@@ -105,13 +117,7 @@ class Light_GBMRanker:
                                           eval_set=[(self.X_validation, self.y_validation)],
                                           eval_group=[self.qids_validation],
                                           eval_at=5,
-                                          verbose=10,
-                                          categorical_feature=['visitor_location_country_id',
-                                                               'prop_country_id',
-                                                               'prop_brand_bool',
-                                                               'promotion_flag',
-                                                               'srch_destination_id'
-                                                               ]
+                                          verbose=10
                                           )
                 gbm_init.booster_.save_model('lightGBM_model/lgbm_ranker/lgb_ranker.txt',
                                              num_iteration=gbm_init.best_iteration_)
@@ -157,10 +163,10 @@ class Light_GBMRanker:
         return ['weighted_ndcg', eval_score, True]
 
 
-"""if exists('data/preprocessed/training_VU_DM.csv') and exists('data/preprocessed/testing_VU_DM.csv'):
+if exists('data/full_data/preprocessed/training_VU_DM.csv') and exists('data/full_data/preprocessed/testing_VU_DM.csv'):
 
-    training_filepath = "data/preprocessed/training_VU_DM.csv"
-    testing_filepath = "data/preprocessed/testing_VU_DM.csv"
+    training_filepath = "data/full_data/preprocessed/training_VU_DM.csv"
+    testing_filepath = "data/full_data/preprocessed/testing_VU_DM.csv"
     run_large_file_LGBM = Light_GBMRanker(training_filepath, testing_filepath)
 
 else:
@@ -168,9 +174,9 @@ else:
     unprocessed_testing_filepath = "data/full_data/test_set_VU_DM.csv"  # these file paths will differ from yours
     PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)
 
-    #processed_training_filepath = "data/preprocessed/training_VU_DM.csv"
-    #processed_testing_filepath = "data/preprocessed/testing_VU_DM.csv"
-    #run_large_file_LGBM = Light_GBMRanker(processed_training_filepath, processed_testing_filepath)"""
+    processed_training_filepath = "data/preprocessed/training_VU_DM.csv"
+    processed_testing_filepath = "data/preprocessed/testing_VU_DM.csv"
+    run_large_file_LGBM = Light_GBMRanker(processed_training_filepath, processed_testing_filepath)
 
 
 class small_data_LGBMRanker:
@@ -204,7 +210,7 @@ class small_data_LGBMRanker:
         X_validation = validation_df.drop(["srch_id", 'ranking', 'prop_id'], axis=1)
         y_validation = validation_df["ranking"]
 
-        cv = GroupKFold(n_splits=10)
+        cv = StratifiedKFold(n_splits=10)
 
         return qids_train, X_train, y_train, qids_validation, X_validation, y_validation, cv
 
@@ -212,16 +218,21 @@ class small_data_LGBMRanker:
         qids_train, X_train, y_train, qids_validation, X_validation, y_validation, cv = \
             self.example_train_preprocessing()
 
+        scorer = make_scorer(self.eval_ndcg, greater_is_better=True)
+
         X_test = self.df_test
         model = lightgbm.LGBMRanker(boosting_type='dart',
                                     objective="lambdarank",
                                     metric='ndcg',
                                     ndcg_at=5,
                                     label_gain=[i for i in range(max(y_train.max(), y_validation.max()) + 1)],
-                                    learning_rate=0.0001,
-                                    random_state=42
+                                    learning_rate=0.001,
+                                    random_state=42,
+                                    feature_fraction=0.9,
+                                    max_bin=355,
                                     )
-        gsearch = HalvingGridSearchCV(estimator=model, param_grid=self.param_grid, cv=cv, scoring=ndcg_score)
+
+        gsearch = HalvingGridSearchCV(estimator=model, param_grid=self.param_grid, cv=cv, scoring=scorer)
         gsearch.fit(X=X_train, y=y_train, verbose=10)
 
         print(gsearch.best_params_, gsearch.best_score_)
@@ -237,9 +248,9 @@ class small_data_LGBMRanker:
             #ndcg_at=5,
             verbose=10
             # xe_ndcg_mart
-        )
+        )"""
 
-        final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
+        """final_predictions_df = pd.DataFrame(columns=['srch_id', 'prop_id'])
         sorted_srchs = sorted(X_test['srch_id'].unique())
 
         for srch_id in enumerate(sorted_srchs):
@@ -258,19 +269,42 @@ class small_data_LGBMRanker:
         final_predictions_df.rename(columns={'property_id': 'prop_id'}, inplace=True)
         final_predictions_df.to_csv(r'data/test_data_5000_predictions.csv', index=False, header=True)"""
 
-    def eval_ndcg(self, y_true, y_pred):
+    def ndcg_score(self, true_filepath, pred_filepath):
+        """
+        takes the true scores and predicted score and calculates an ndcg score (using sklearn)
+        returns: averaged ndcg score over all queries
+        """
+        true_df = pd.read_csv(true_filepath)
+        pred_df = pd.read_csv(pred_filepath)
 
-        eval_score = ndcg_score(y_true, y_pred, k=5)
-        self.all_ndcg.append(eval_score)
+        all_srch_ids = set(true_df['srch_id'].to_list())
 
-        return ['weighted_ndcg', eval_score, True]
+        ndcgs = []
+
+        for srch_id in all_srch_ids:
+            gold_srch = true_df[true_df['srch_id'] == srch_id]
+            gold_list = gold_srch['prop_id'].to_list()
+
+            pred_srch = pred_df[pred_df['srch_id'] == srch_id]
+            pred_list = pred_srch['prop_id'].to_list()
+
+            true_scores = np.asarray([gold_list])
+            pred_scores = np.asarray([pred_list])
+
+            dcg = dcg_score(true_scores, pred_scores, k=5)
+            idcg = dcg_score(true_scores, true_scores, k=5)
+
+            ndcg = dcg / idcg
+            ndcgs.append(ndcg)
+
+        return statistics.mean(ndcgs)
 
 
 """unprocessed_training_filepath = "data/5000/training_data_5000.csv"  # these file paths will differ from yours
 unprocessed_testing_filepath = "data/2500/testing_data_2500.csv"  # these file paths will differ from yours
 PreProcess(unprocessed_training_filepath, unprocessed_testing_filepath)"""
 
-train_example_file = "data/preprocessed/training_VU_DM.csv"
+"""train_example_file = "data/preprocessed/training_VU_DM.csv"
 test_example_file = "data/preprocessed/testing_VU_DM.csv"
 
-small_data_LGBMRanker(train_example_file, test_example_file)
+small_data_LGBMRanker(train_example_file, test_example_file)"""
